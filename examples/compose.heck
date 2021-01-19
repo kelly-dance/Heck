@@ -1,0 +1,4 @@
+addOne = fn a: a + 1;
+div2 = fn a: a / 2;
+addTwoDiv2 = compose [addOne, addOne, div2];
+return addTwoDiv2 6;

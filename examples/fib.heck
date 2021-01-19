@@ -1,0 +1,7 @@
+fib = fn n: {
+  return ((fn [p, [a, b]]:
+    if (p > 0)
+      then (recurse [p - 1, [b, a + b]])
+      else [a,b]) [n, [0, 1]]) @ 1;
+};
+return fib 10;

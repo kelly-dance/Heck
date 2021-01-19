@@ -1,0 +1,1 @@
+return sum filter [range [0, 1000], fn n: (n % 3) * (n % 5) == 0]

@@ -1,0 +1,5 @@
+solve = fn [a, b, lim, acc]: 
+  if b <= lim
+    then solve [b, a + b, lim, acc + if b % 2 == 0 then b else 0]
+    else acc;
+return solve [0, 1, 4000000, 0];
