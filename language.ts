@@ -1,22 +1,31 @@
 export abstract class Expression {
+  protected forcedScope?: Scope;
+
+  lock(scope: Scope): this {
+    this.forcedScope = scope;
+    return this;
+  };
+
+  abstract copyLock(scope: Scope): Expression;
+
   resolve(scope: Scope){
     return this as Expression;
   };
 
   getValue(scope: Scope): any {
-    return this.resolve(scope).getValue(scope);
+    return this.resolve(this.forcedScope || scope).getValue(this.forcedScope || scope);
   }
   
   force(scope: Scope): Expression {
-    const next = this.resolve(scope);
+    const next = this.resolve(this.forcedScope || scope);
     if(next === this) return next;
-    else return next.force(scope);
+    else return next.force(this.forcedScope || scope);
   }
 
   forceDeep(scope: Scope): Expression {
-    const next = this.resolve(scope);
+    const next = this.resolve(this.forcedScope || scope);
     if(next === this) return next;
-    else return next.forceDeep(scope);
+    else return next.forceDeep(this.forcedScope || scope);
   }
 }
 
@@ -28,6 +37,10 @@ export class ConstantExpression<T> extends Expression {
   getValue(scope: Scope): T {
     return this.value;
   }
+
+  copyLock(scope: Scope): Expression {
+    return new ConstantExpression<T>(this.value);
+  }
 }
 
 export class LazyExpression extends Expression {
@@ -36,7 +49,11 @@ export class LazyExpression extends Expression {
   }
 
   resolve(scope: Scope){
-    return this.resolver().resolve(scope);
+    return this.resolver().resolve(this.forcedScope || scope);
+  }
+
+  copyLock(scope: Scope){
+    return new LazyExpression(this.resolver).lock(scope);
   }
 }
 
@@ -46,11 +63,15 @@ export class ReferenceExpression extends Expression {
   }
 
   resolve(scope: Scope){
-    return scope.fetch(this.name);
+    return (this.forcedScope || scope).fetch(this.name);
   }
 
   assign(scope: Scope, value: Expression, local: Local){
-    scope.set(this.name, value.resolve(scope), local);
+    (this.forcedScope || scope).set(this.name, value.resolve((this.forcedScope || scope)), local);
+  }
+
+  copyLock(scope: Scope){
+    return new ReferenceExpression(this.name).lock(scope);
   }
 }
 
@@ -102,20 +123,22 @@ export class FunctionValue extends Callable {
   }
 
   getValue(scope: Scope){
-    return super.getValue(scope);
+    return super.getValue((this.forcedScope || scope));
   }
 
   execute(scope: Scope, args: Expression): Expression {
     const go = () => {
       const localScope = new Scope(this.parentScope);
       localScope.set('recurse', this, 'local');
-      assignToScope(localScope, scope, this.argRef, args, 'local');
-      return this.code.resolve(localScope);
+      assignToScope(localScope, this.forcedScope || scope, this.argRef, args, 'local');
+      return this.code.resolve(localScope).resolve(localScope); // resolves twices because expression is wrapped in a ReturnExpression
     }
-    if(this.lazy){
-      return new LazyExpression(go);
-    }
+    if(this.lazy) return new LazyExpression(go);
     return go();
+  }
+
+  copyLock(scope: Scope){
+    return new FunctionValue(this.code.copyLock(scope), this.argRef.copyLock(scope), this.lazy, this.parentScope).lock(scope);
   }
 }
 
@@ -125,11 +148,15 @@ export class FunctionDeclaration extends Callable {
   }
 
   resolve(scope: Scope){
-    return new FunctionValue(this.code, this.argRef, this.lazy, scope);
+    return new FunctionValue(this.code, this.argRef, this.lazy, (this.forcedScope || scope));
   }
 
   execute(scope: Scope, args: Expression){
-    return this.resolve(scope).execute(scope, args);
+    return this.resolve((this.forcedScope || scope)).execute((this.forcedScope || scope), args);
+  }
+
+  copyLock(scope: Scope){
+    return new FunctionDeclaration(this.code.copyLock(scope), this.argRef, this.lazy).lock(scope);
   }
 }
 
@@ -139,8 +166,12 @@ export class BuiltInFnExpression extends Callable {
   }
 
   execute(scope: Scope, args: Expression): Expression {
-    if(this.lazy) return new LazyExpression(() => this.fn(scope, args));
-    return this.fn(scope, args);
+    if(this.lazy) return new LazyExpression(() => this.fn((this.forcedScope || scope), args));
+    return this.fn((this.forcedScope || scope), args);
+  }
+
+  copyLock(scope: Scope) {
+    return new BuiltInFnExpression(this.fn, this.lazy).lock(scope);
   }
 }
 
@@ -154,7 +185,11 @@ export class ArrayValue extends ConstantExpression<Expression[]> {
   }
 
   forceDeep(scope: Scope){
-    return new ArrayValue(this.value.map(e => e.forceDeep(scope)));
+    return new ArrayValue(this.value.map(e => e.forceDeep((this.forcedScope || scope))));
+  }
+
+  copyLock(scope: Scope): Expression {
+    return new ArrayValue(this.value.map(e => e.copyLock(scope))).lock(scope);
   }
 }
 
@@ -164,29 +199,41 @@ export class FunctionCall extends Expression {
   }
 
   resolve(scope: Scope){
-    const resolvedFn = this.fn.getValue(scope);
-    if(resolvedFn instanceof Callable) return resolvedFn.execute(scope, this.args);
+    const resolvedFn = this.fn.getValue((this.forcedScope || scope));
+    if(resolvedFn instanceof Callable) return resolvedFn.execute((this.forcedScope || scope), this.args);
     throw new Error(`Can not call ${resolvedFn}`);
   }
 
   getValue(scope: Scope){
-    return super.getValue(scope);
+    return super.getValue((this.forcedScope || scope));
+  }
+
+  copyLock(scope: Scope){
+    return new FunctionCall(this.fn.copyLock(scope), this.args.copyLock(scope)).lock(scope);
   }
 }
 
 export class CodeBlock extends Expression {
-  constructor(private code: AST){
+  constructor(private code: AST, private lazy: boolean){
     super();
   }
 
   resolve(scope: Scope){
-    const localScope = new Scope(scope);
-    // console.log(Deno.inspect(localScope, { depth: 100, colors: true }));
-    for(const expr of this.code){
-      if(expr instanceof ReturnExpression) return expr.resolve(localScope);
-      expr.resolve(localScope);
+    const go = () => {
+      const localScope = new Scope((this.forcedScope || scope));
+      // console.log(Deno.inspect(localScope, { depth: 100, colors: true }));
+      for(const expr of this.code){
+        if(expr instanceof ReturnExpression) return expr.resolve(localScope);
+        expr.resolve(localScope);
+      }
+      return new ConstantExpression(undefined);
     }
-    return new ConstantExpression(undefined);
+    if(this.lazy) return new LazyExpression(go);
+    return go();
+  }
+
+  copyLock(scope: Scope){
+    return new CodeBlock(this.code.map(e => e.copyLock(scope)), this.lazy).lock(scope);
   }
 }
 
@@ -196,9 +243,13 @@ export class BinaryMathExpression extends Expression {
   }
 
   resolve(scope: Scope){
-    const resolvedOp = this.op.getValue(scope);
+    const resolvedOp = this.op.getValue((this.forcedScope || scope));
     if(!(resolvedOp instanceof Callable)) throw new Error('Invalid operator');
-    return new LazyExpression(() => resolvedOp.execute(scope, new ArrayValue([this.left, this.right])));
+    return new LazyExpression(() => resolvedOp.execute((this.forcedScope || scope), new ArrayValue([this.left, this.right])));
+  }
+
+  copyLock(scope: Scope){
+    return new BinaryMathExpression(this.left.copyLock(scope), this.right.copyLock(scope), this.op.copyLock(scope)).lock(scope);
   }
 }
 
@@ -208,8 +259,12 @@ export class AssignmentExpression extends Expression {
   }
 
   resolve(scope: Scope){
-    assignToScope(scope, scope, this.location, this.data.resolve(scope), this.local);
+    assignToScope((this.forcedScope || scope), (this.forcedScope || scope), this.location, this.data.copyLock((this.forcedScope || scope)), this.local);
     return this.data;
+  }
+
+  copyLock(scope: Scope){
+    return new AssignmentExpression(this.location.copyLock(scope), this.data.copyLock(scope), this.local).lock(scope);
   }
 }
 
@@ -219,7 +274,16 @@ export class ReturnExpression extends Expression {
   }
 
   resolve(scope: Scope){
-    return this.returnValue.forceDeep(scope);
+    return this.returnValue.copyLock(scope);
+    // return new LazyExpression(() => {
+    //   return this.returnValue.resolve((this.forcedScope || scope));
+    // })
+
+    // return this.returnValue.forceDeep((this.forcedScope || scope));
+  }
+
+  copyLock(scope: Scope){
+    return new ReturnExpression(this.returnValue.copyLock(scope)).lock(scope);
   }
 }
 
@@ -229,19 +293,25 @@ export class IfElseExpression extends Expression {
   }
 
   resolve(scope: Scope){
-    if(this.condition.getValue(scope)) return this.onTrue;
+    if(this.condition.getValue((this.forcedScope || scope))) return this.onTrue;
     else return this.onFalse || new ConstantExpression(undefined);
+  }
+
+  copyLock(scope: Scope){
+    return new IfElseExpression(this.condition.copyLock(scope), this.onTrue.copyLock(scope), this.onFalse?.copyLock(scope)).lock(scope);
   }
 }
 
 export const assignToScope = (scope: Scope, oldScope: Scope, location: Expression, data: Expression, local: Local) => {
-  data = data.forceDeep(oldScope);
   if(location instanceof ReferenceExpression) location.assign(scope, data, local);
   else {
     location = location.force(scope);
-    if(location instanceof ArrayValue && data instanceof ArrayValue) {
-      for(let i = 0; i < location.length(); i++){
-        assignToScope(scope, oldScope, location.getExpressionAt(i), data.getExpressionAt(i), local);
+    if(location instanceof ArrayValue){
+      data = data.force(oldScope);
+      if(data instanceof ArrayValue) {
+        for(let i = 0; i < location.length(); i++){
+          assignToScope(scope, oldScope, location.getExpressionAt(i), data.getExpressionAt(i), local);
+        }
       }
     }
     else throw new Error('Invalid assignment');

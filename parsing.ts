@@ -144,6 +144,12 @@ const parseCodeBlock: Parser = code => {
   const openCurly = parseConstantString('{')(code);
   if(!openCurly[0]) return [undefined, code];
   let rest = openCurly[1].trim();
+  const bang = parseConstantString('!')(rest);
+  let lazy = true;
+  if(bang[0]) {
+    lazy = false;
+    rest = bang[1].trim();
+  }
   const vals: AST = [];
   while(true){
     const val = parseExpression(rest);
@@ -158,7 +164,7 @@ const parseCodeBlock: Parser = code => {
   const closeCurly = parseConstantString('}')(rest);
   if(!closeCurly[0]) return [undefined, code];
   rest = closeCurly[1].trim();
-  return [new CodeBlock(vals), rest];
+  return [new CodeBlock(vals, lazy), rest];
 }
 
 const parseGroup: Parser = code => {
@@ -285,5 +291,5 @@ export const parse: Parser = code => {
     expressions.push(expression);
     rest = extra.trim();
   }
-  return [new CodeBlock(expressions), rest.substring(1)];
+  return [new CodeBlock(expressions, false), rest.substring(1)];
 }

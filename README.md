@@ -39,7 +39,7 @@ return add [1, 2]
 #### Notes:
 Functions are composed of a single expression as the body.
 
-Functions are sometimes lazy (because its kinda broken oof) but if you want a function to always be run immediately when called (maybe for io) use the `!` as seen in the first example.
+Functions are usually lazy (sometimes its broken tho haha) but if you want a function to always be run immediately when called (maybe for io) use the `!` as seen in the first example.
 
 Functions only accept a single argument, so pass an array and destructure values.
 
@@ -89,6 +89,19 @@ addTwoDiv2 = compose [addOne, addOne, div2];
 return addTwoDiv2 6;
 ```
 This example returns 4 (not 5).
+
+### Something cool
+
+```
+naturalNumbers = (fn n: [n, recurse n + 1]) 1
+print take [100, naturalNumbers]
+```
+
+This code prints numbers "1, 2, 3 ... 100";
+
+Here I am defining natural numbers to be an infinite linked list (I am informally defining linked lists as an array of a value, recurse). I used an function a function inline because I only needed to call it once and used `recurse` within the function for recursion. The end of a linked list can just omit the second value in the array.
+
+`take` is a built in method that accepts a number and a linked list. It will return an array contain n elements from the linked list or just until the end was reached if there is one.
 
 More built in functions can be found [./builtins.ts](./builtins.ts).
 

@@ -54,6 +54,21 @@ export const modulo = new BuiltInFnExpression((scope, args) => {
   return new ConstantExpression(a >= 0 ? a % b : (b + (a % b)) % b);
 }, true);
 
+export const sqrt = new BuiltInFnExpression((scope, args) => {
+  const n = getAsNum(scope, args);
+  return new ConstantExpression(Math.sqrt(n));
+}, true);
+
+export const floor = new BuiltInFnExpression((scope, args) => {
+  const n = getAsNum(scope, args);
+  return new ConstantExpression(Math.floor(n));
+}, true);
+
+export const ceil = new BuiltInFnExpression((scope, args) => {
+  const n = getAsNum(scope, args);
+  return new ConstantExpression(Math.ceil(n));
+}, true);
+
 export const range = new BuiltInFnExpression((scope, args) => {
   const [start, end] = getAsNumArr(scope, args);
   return new ArrayValue(Array.from({length: end - start}, (_, i) => new ConstantExpression(start + i)));
@@ -118,6 +133,30 @@ export const compose = new BuiltInFnExpression((scope, args) => {
   const arg = new ReferenceExpression('arg');
   return fns.reduce((prev, cur) => new FunctionValue(new FunctionCall(cur, new FunctionCall(prev, arg)), arg, false, scope), identity)
 }, true);
+
+export const force = new BuiltInFnExpression((scope, args) => {
+  return args.force(scope);
+}, false);
+
+export const forceDeep = new BuiltInFnExpression((scope, args) => {
+  return args.forceDeep(scope);
+}, false);
+
+export const take = new BuiltInFnExpression((scope, args) => {
+  let [numArg, ll] = getAsArr(scope, args);
+  let num = getAsNum(scope, numArg);
+  num = Math.floor(num);
+  if(num < 0) return new ArrayValue([]);
+  const vals: Expression[] = [];
+  while(num){
+    ll = ll.force(scope);
+    if(!(ll instanceof ArrayValue)) break;
+    vals.push(ll.getExpressionAt(0));
+    ll = ll.getExpressionAt(1);
+    num--;
+  }
+  return new ArrayValue(vals);
+}, false);
 
 const getAsNum = (scope: Scope, args: Expression): number => {
   const val = args.getValue(scope);
