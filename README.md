@@ -33,7 +33,7 @@ printAlias "I called a function!";
 ```
 ```
 add = fn [a, b]: a + b;
-print add [1, 2]
+return add [1, 2]
 ```
 
 #### Notes:
@@ -44,6 +44,8 @@ Functions are sometimes lazy (because its kinda broken oof) but if you want a fu
 Functions only accept a single argument, so pass an array and destructure values.
 
 Functions create their own enclosed scope.
+
+Functions have a value in scope called `recurse` that refers to the function being run. This can be useful if you want to use recursion inside a function that is not saved to a variable, but that often leads to uglier code so be careful with that.
 
 ### Code Blocks
 ```
@@ -72,11 +74,11 @@ Code blocks create their own enclosed scope.
 ### Built in functions
 
 ```
-print sum [1,2,3]
+return sum [1,2,3];
 ```
 Take the sum of an array. The `+` operator actually calls this internally. All infix operators also have a named version in scope. Some are limited to 2 parameters like (`divide` and `mod`), but others work for any number of elements like `product`, `any` (used for the or operation, `|`) and `every` (used for the and operator, `&`).
 ```
-print filter [range [0, 20], fn n: n % 2 == 0]
+return filter [range [0, 20], fn n: n % 2 == 0];
 ```
 `range` returns [begin, end).
 `filter` takes an array and a predicate that accepts a value from the array and returns boolean (truthy probably works as well, I'm not sure).
