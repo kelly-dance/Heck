@@ -1,20 +1,25 @@
 import * as builtins from './builtins.ts';
-import { Scope, Expression } from './language.ts';
-import { parse } from './parsing.ts';
+import { Scope, Expression, ConstantExpression } from './language.ts';
 
 const file = Deno.args[0];
-const code = new TextDecoder().decode(Deno.readFileSync(file));
-
-const [program] = parse(code);
-if(!program) throw new Error('Failed to parse Program')
-// console.log(Deno.inspect(program, { depth: 1000, colors: true }));
 
 const globalScope = new Scope();
 
-Object.entries(builtins).forEach(([key, fn]) => globalScope.set(key, fn as Expression, 'local'));
+Object.entries(builtins).forEach(([key, fn]) => {
+  if(fn instanceof Expression) globalScope.set(key, fn, 'local');
+});
+
+globalScope.set('location', new ConstantExpression('.'), 'local');
 
 // console.log('====EXECUTING====')
 
-const finalReturn = builtins.show.execute(globalScope, program).getValue(globalScope);
+await builtins.loadingPromise;
+
+const finalReturn = builtins.show.execute(
+  globalScope,
+  builtins.load.execute(globalScope, new ConstantExpression(file))
+).getValue(globalScope);
+
+// const finalReturn = builtins.show.execute(globalScope, program).getValue(globalScope);
 
 console.log(`Program returned: ${finalReturn}`);

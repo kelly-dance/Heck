@@ -44,12 +44,16 @@ export class ConstantExpression<T> extends Expression {
 }
 
 export class LazyExpression extends Expression {
+  private cache?: Expression;
+
   constructor(private resolver: () => Expression){
     super();
   }
 
   resolve(scope: Scope){
-    return this.resolver().resolve(this.forcedScope || scope);
+    if(this.cache) return this.cache;
+    this.cache = this.resolver().resolve(this.forcedScope || scope);
+    return this.cache;
   }
 
   copyLock(scope: Scope){
@@ -106,6 +110,11 @@ export class Scope {
       else this.parent.set(key, value, 'any');
     }
     // never;
+  }
+
+  get root(): Scope {
+    if(!this.parent) return this;
+    return this.parent.root;
   }
 }
 
@@ -180,6 +189,10 @@ export class ArrayValue extends ConstantExpression<Expression[]> {
     return this.value[index] || new ConstantExpression(undefined);
   }
 
+  setExpressionAt(index: number, value: Expression){
+    this.value[index] = value;
+  }
+
   length(){
     return this.value.length;
   }
@@ -214,26 +227,42 @@ export class FunctionCall extends Expression {
 }
 
 export class CodeBlock extends Expression {
+  private cache?: Expression;
+
   constructor(private code: AST, private lazy: boolean){
     super();
   }
 
   resolve(scope: Scope){
+    if(this.cache) return this.cache;
     const go = () => {
       const localScope = new Scope((this.forcedScope || scope));
-      // console.log(Deno.inspect(localScope, { depth: 100, colors: true }));
       for(const expr of this.code){
         if(expr instanceof ReturnExpression) return expr.resolve(localScope);
         expr.resolve(localScope);
       }
       return new ConstantExpression(undefined);
     }
-    if(this.lazy) return new LazyExpression(go);
-    return go();
+    this.cache = this.lazy ? new LazyExpression(go) : go();
+    return this.cache;
   }
 
   copyLock(scope: Scope){
     return new CodeBlock(this.code.map(e => e.copyLock(scope)), this.lazy).lock(scope);
+  }
+}
+
+export class CodeBlockDeclaration extends Expression {
+  constructor(private code: AST, private lazy: boolean){
+    super();
+  }
+
+  resolve(scope: Scope){
+    return new CodeBlock(this.code, this.lazy).resolve(this.forcedScope || scope);
+  }
+
+  copyLock(scope: Scope){
+    return new CodeBlockDeclaration(this.code.map(e => e.copyLock(scope)), this.lazy).lock(scope);
   }
 }
 
@@ -274,12 +303,7 @@ export class ReturnExpression extends Expression {
   }
 
   resolve(scope: Scope){
-    return this.returnValue.copyLock(scope);
-    // return new LazyExpression(() => {
-    //   return this.returnValue.resolve((this.forcedScope || scope));
-    // })
-
-    // return this.returnValue.forceDeep((this.forcedScope || scope));
+    return this.returnValue.copyLock(scope).resolve(scope);
   }
 
   copyLock(scope: Scope){
@@ -293,8 +317,8 @@ export class IfElseExpression extends Expression {
   }
 
   resolve(scope: Scope){
-    if(this.condition.getValue((this.forcedScope || scope))) return this.onTrue;
-    else return this.onFalse || new ConstantExpression(undefined);
+    if(this.condition.getValue((this.forcedScope || scope))) return this.onTrue.resolve(scope);
+    else return this.onFalse?.resolve(scope) || new ConstantExpression(undefined);
   }
 
   copyLock(scope: Scope){

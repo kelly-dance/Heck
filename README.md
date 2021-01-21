@@ -16,15 +16,23 @@ return can be used out side of code blocks to exit the program and print the fin
 
 Semicolons are may not always cause errors when excluded, but in many places they will, so use them.
 
-### Variables
+### Variables & Datatypes
 ```
 x = 1
-_ = 2
-another2 = 3
+_ = "a string"
+another2 = true
+something = [1, "another string"]
 ```
 
 #### Notes
 Variables names cannot start with a number.
+
+WARNING: Be careful about what values you put in arrays. I discourage mutating variables, but it is valid. say you have this array:
+```
+x = 1
+arr = [x + 1]
+```
+if print out `arr` you will find `[2]` as expected but say later in the code you reassign `x` to be `2` printing the array will now result in `[3]`. Your first thought may to instead assign `arr = [force (x + 1)]` however instead of forcing the value you assign into the array you are actually assign the result of forcing that value into the array. wtf? Ok so what I mean by that is force doesn't magically run whever it is used, if it is used inside a lazy value than the value won't get forced. What parameters to built in functions are lazy is kind of in consistent so proceed with caution.
 
 ### Functions
 ```

@@ -1,9 +1,17 @@
-import { BuiltInFnExpression, ConstantExpression, Callable, Expression, Scope, ArrayValue, FunctionValue, ReferenceExpression, FunctionCall } from './language.ts';
+import * as path from "https://deno.land/std@0.83.0/path/mod.ts";
+import { BuiltInFnExpression, ConstantExpression, Callable, Expression, Scope, ArrayValue, FunctionValue, ReferenceExpression, FunctionCall, CodeBlockDeclaration } from './language.ts';
+import { Parser } from "./parsing.ts";
 
 export const show = new BuiltInFnExpression((scope, args): ConstantExpression<string> => {
-  const val = args.getValue(scope);
-  if(Array.isArray(val)) return new ConstantExpression(val.map(v => getAsStr(scope, show.execute(scope, v))).join(', '));
-  return new ConstantExpression(val + '');
+  const internal = (e: Expression, depth: number): string => {
+    const val = e.getValue(scope);
+    if(Array.isArray(val)) {
+      if(depth <= 0) return '...';
+      return '['+val.map(v => internal(v, depth - 1)).join(', ')+']';
+    }
+    return val + '';
+  }
+  return new ConstantExpression(internal(args, 10));
 }, true)
 
 export const print = new BuiltInFnExpression((scope, args) => {
@@ -89,6 +97,11 @@ export const equal = new BuiltInFnExpression((scope, args) => {
   return new ConstantExpression(a.getValue(scope) === b.getValue(scope));
 }, true);
 
+export const notEqual = new BuiltInFnExpression((scope, args) => {
+  const [a, b] = getAsArr(scope, args);
+  return new ConstantExpression(a.getValue(scope) !== b.getValue(scope));
+}, true);
+
 export const greaterThan = new BuiltInFnExpression((scope, args) => {
   const [a, b] = getAsArr(scope, args);
   return new ConstantExpression(a.getValue(scope) > b.getValue(scope));
@@ -124,6 +137,12 @@ export const arrayAccess = new BuiltInFnExpression((scope, args) => {
   return arr[pos];
 }, true);
 
+export const arrayAssignment = new BuiltInFnExpression((scope, args) => {
+  const [arr, pos, value] = unpack<[ArrayValue, number, Expression]>(scope, args, [getAsIs, getAsNum, getAsIs]);
+  (arr.force(scope) as ArrayValue).setExpressionAt(pos, value.resolve(scope));
+  return value;
+}, false);
+
 export const identity = new BuiltInFnExpression((scope, args) => {
   return args.resolve(scope); // I have no clue why removing the resolve here breaks it
 }, true);
@@ -131,7 +150,7 @@ export const identity = new BuiltInFnExpression((scope, args) => {
 export const compose = new BuiltInFnExpression((scope, args) => {
   const fns = getAsFnArr(scope, args);
   const arg = new ReferenceExpression('arg');
-  return fns.reduce((prev, cur) => new FunctionValue(new FunctionCall(cur, new FunctionCall(prev, arg)), arg, false, scope), identity)
+  return fns.reduce((prev, cur) => new FunctionValue(new FunctionCall(cur, new FunctionCall(prev, arg)), arg, false, scope), identity);
 }, true);
 
 export const force = new BuiltInFnExpression((scope, args) => {
@@ -157,6 +176,30 @@ export const take = new BuiltInFnExpression((scope, args) => {
   }
   return new ArrayValue(vals);
 }, false);
+
+export const load = new BuiltInFnExpression((scope, args) => {
+  const file = getAsStr(scope, args);
+  const prevLocation = scope.fetch('location')?.getValue(scope) || '.';
+  const relPath = '.' + path.SEP + path.join(path.dirname(prevLocation), file);
+  const code = new TextDecoder().decode(Deno.readFileSync(relPath));
+  const [ast] = parse(code);
+  if(!ast) throw new Error(`Failed to parse ${relPath}`);
+  // console.log(Deno.inspect(ast, { depth: 100, colors: true }));
+  const fileScope = new Scope(scope.root);
+  fileScope.set('location', new ConstantExpression(relPath), 'local');
+  return ast.copyLock(fileScope);
+}, false);
+
+export const forLoop = new BuiltInFnExpression((scope, args) => {
+  const [header, body] = unpack<[ArrayValue, Callable]>(scope, args, [getAsIs, getAsFn]);
+  const [init, condition, afterthought] = unpack<[Expression, Callable, Callable]>(scope, header, [getAsIs, getAsFn, getAsFn]);
+  for(let control = init; condition.execute(scope, control).getValue(scope); control = afterthought.execute(scope, control)){
+    body.execute(scope, control).force(scope);
+  }
+  return new ConstantExpression(undefined);
+}, false);
+
+const getAsIs = <T>(scope: Scope, args: T): T => args;
 
 const getAsNum = (scope: Scope, args: Expression): number => {
   const val = args.getValue(scope);
@@ -197,3 +240,8 @@ const unpack = <T extends any[]>(scope: Scope, args: Expression, types: ((scope:
   const arr = getAsArr(scope, args);
   return types.map((fn, i) => fn(scope, arr[i])) as T;
 };
+
+let parse: Parser;
+export const loadingPromise = import('./parsing.ts').then(imports => {
+  parse = imports.parse;
+})

@@ -12,6 +12,7 @@ import {
   IfElseExpression,
   ReturnExpression,
   FunctionDeclaration,
+  CodeBlockDeclaration,
 } from './language.ts';
 import * as builtins from './builtins.ts';
 
@@ -43,11 +44,11 @@ const parseString: Parser = code => {
   let i = 1;
   while(i < code.length){
     const cur = code.charAt(i);
-    if(cur === '"') break;
+    if(cur === '"') return [new ConstantExpression(s), code.substring(i + 1)];
     s += cur;
     i++;
   }
-  return [new ConstantExpression(s), code.substring(i + 1)];
+  return [undefined, code];
 }
 
 const parseVariableReference: Parser = code => {
@@ -164,7 +165,7 @@ const parseCodeBlock: Parser = code => {
   const closeCurly = parseConstantString('}')(rest);
   if(!closeCurly[0]) return [undefined, code];
   rest = closeCurly[1].trim();
-  return [new CodeBlock(vals, lazy), rest];
+  return [new CodeBlockDeclaration(vals, lazy), rest];
 }
 
 const parseGroup: Parser = code => {
@@ -191,6 +192,7 @@ const parseInfixOp: Parser = code => {
     ],
     [
       ['==', builtins.equal],
+      ['!=', builtins.notEqual],
       ['<', builtins.lessThan],
       ['>', builtins.greaterThan],
       ['<=', builtins.lessThanEqual],
@@ -231,7 +233,7 @@ const parseInfixOp: Parser = code => {
   return [undefined, code];
 }
 
-// if EXPRESSION EXPRESSION?> else EXPRESSION
+// if EXPRESSION then EXPRESSION?> else EXPRESSION
 export const parseIfElse: Parser = code => {
   let rest = code.trim();
   if(!rest.startsWith('if')) return [undefined, code];
