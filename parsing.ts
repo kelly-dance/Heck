@@ -13,6 +13,7 @@ import {
   ReturnExpression,
   FunctionDeclaration,
   CodeBlockDeclaration,
+  ArrayAccessExpression,
 } from './language.ts';
 import * as builtins from './builtins.ts';
 
@@ -26,6 +27,14 @@ const reservedWords = [
   'true',
   'false',
 ]
+
+const parseAny = (parsers: Parser[]): Parser => (code: string) => {
+  for(const parser of parsers){
+    const [result, rest] = parser(code);
+    if(result) return [result, rest];
+  }
+  return [undefined, code];
+}
 
 const parseConstantString = (str: string): Parser => code => {
   if(code.startsWith(str)) return [new ConstantExpression(str), code.substring(str.length)];
@@ -60,16 +69,9 @@ const parseVariableReference: Parser = code => {
   return [new ReferenceExpression(name), rest];
 }
 
-const parseVarRefOrList: Parser = code => {
-  const varRef = parseVariableReference(code);
-  if(varRef[0]) return varRef
-  else return parseList(code);
-}
-
 const parseVariableAssignment: Parser = code => {
-  const local = code.startsWith('local') ? 'local' : code.startsWith('nonlocal') ? 'nonlocal' : '';
-  let rest = code.substring(local.length).trim();
-  let varRefResult = parseVarRefOrList(rest);
+  let rest = code.trim();
+  let varRefResult = parseDestructable(rest);
   let varRef = varRefResult[0];
   if(!varRef) return [undefined, code];
   rest = varRefResult[1].trim();
@@ -79,7 +81,7 @@ const parseVariableAssignment: Parser = code => {
   const dataRef = data[0];
   if(!dataRef) return [undefined, code];
   rest = data[1];
-  return [new AssignmentExpression(varRef, dataRef, local || 'any'), rest];
+  return [new AssignmentExpression(varRef, dataRef), rest];
 }
 
 const parseFunctionCall: Parser = code => {
@@ -130,7 +132,7 @@ const parseFunction: Parser = code => {
   const bang = parseConstantString('!')(rest);
   const immediate = !!bang[0];
   if(immediate) rest = bang[1].trim();
-  const params = parseVarRefOrList(rest);
+  const params = parseDestructable(rest);
   if(!params[0]) return [undefined, code];
   rest = params[1].trim();
   if(!rest.startsWith(':')) return [undefined, code];
@@ -210,9 +212,6 @@ const parseInfixOp: Parser = code => {
     ],
     [
       ['^', builtins.pow],
-    ],
-    [
-      ['@', builtins.arrayAccess],
     ]
   ];
   for(const stage of stages){
@@ -253,13 +252,23 @@ export const parseIfElse: Parser = code => {
   return [new IfElseExpression(condition[0], onTrue[0], onFalse[0]), onFalse[1]];
 }
 
-const parseAny = (parsers: Parser[]): Parser => (code: string) => {
-  for(const parser of parsers){
-    const [result, rest] = parser(code);
-    if(result) return [result, rest];
-  }
-  return [undefined, code];
+const parseArrayAccess: Parser = code => {
+  let rest = code.trim();
+  const atPos = rest.indexOf('@');
+  if(atPos === -1) return [undefined, code];
+  let varRefResult = parseExpression(rest.substring(0, atPos));
+  let varRef = varRefResult[0];
+  const leftOver = varRefResult[1].trim();
+  if(!varRef || leftOver !== '') return [undefined, code];
+  rest = rest.substring(atPos + 1).trim();
+  const position = parseAny([parseGroup, parseVariableReference, parseNumber])(rest);
+  const posRef = position[0];
+  if(!posRef) return [undefined, code];
+  rest = position[1];
+  return [new ArrayAccessExpression(varRef, posRef), rest];
 }
+
+const parseDestructable = parseAny([parseArrayAccess, parseVariableReference, parseList]);
 
 const parsers: Parser[] = [
   parseBoolean,
@@ -268,6 +277,7 @@ const parsers: Parser[] = [
   parseFunction,
   parseFunctionCall,
   parseVariableAssignment,
+  parseArrayAccess,
   parseInfixOp,
   parseGroup,
   parseCodeBlock,

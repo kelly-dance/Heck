@@ -67,6 +67,11 @@ export const sqrt = new BuiltInFnExpression((scope, args) => {
   return new ConstantExpression(Math.sqrt(n));
 }, true);
 
+export const succ = new BuiltInFnExpression((scope, args) => {
+  const n = getAsNum(scope, args);
+  return new ConstantExpression(n + 1);
+}, true);
+
 export const floor = new BuiltInFnExpression((scope, args) => {
   const n = getAsNum(scope, args);
   return new ConstantExpression(Math.floor(n));
@@ -90,6 +95,11 @@ export const map = new BuiltInFnExpression((scope, args) => {
 export const filter = new BuiltInFnExpression((scope, args) => {
   const [vals, mapper] = unpack<[Expression[], Callable]>(scope, args, [getAsArr, getAsFn]);
   return new ArrayValue(vals.filter(expr => mapper.execute(scope, expr).getValue(scope)));
+}, true);
+
+export const length = new BuiltInFnExpression((scope, args) => {
+  const n = getAsArr(scope, args);
+  return new ConstantExpression(n.length);
 }, true);
 
 export const equal = new BuiltInFnExpression((scope, args) => {
@@ -132,6 +142,37 @@ export const every = new BuiltInFnExpression((scope, args) => {
   return new ConstantExpression(vals.every(v => v.getValue(scope)));
 }, true);
 
+export const not = new BuiltInFnExpression((scope, args) => {
+  const val = getAsBool(scope, args);
+  return new ConstantExpression(!val);
+}, true);
+
+export const min = new BuiltInFnExpression((scope, args) => {
+  const vals = getAsNumArr(scope, args);
+  return new ConstantExpression(Math.min(...vals));
+}, true);
+
+export const max = new BuiltInFnExpression((scope, args) => {
+  const vals = getAsNumArr(scope, args);
+  return new ConstantExpression(Math.max(...vals));
+}, true);
+
+export const zip = new BuiltInFnExpression((scope, args) => {
+  const expArr = getAsArr(scope, args);
+  const finArr = expArr.map(e => {
+    const val = e.getValue(scope);
+    if(!Array.isArray(val)) throw new Error('Cannot zip non array');
+    return val;
+  })
+  const length = Math.max(...finArr.map(a => a.length));
+  return new ArrayValue(Array.from({length}, (_, i) => new ConstantExpression(finArr.map(a => a[i]))));
+}, true);
+
+export const enumerate = new BuiltInFnExpression((scope, args) => {
+  const expArr = getAsArr(scope, args);
+  return new ArrayValue(expArr.map((v, i) => new ArrayValue([v, new ConstantExpression(i)])))
+}, true);
+
 export const arrayAccess = new BuiltInFnExpression((scope, args) => {
   const [arr, pos] = unpack<[Expression[], number]>(scope, args, [getAsArr, getAsNum]);
   return arr[pos];
@@ -161,6 +202,16 @@ export const forceDeep = new BuiltInFnExpression((scope, args) => {
   return args.forceDeep(scope);
 }, false);
 
+export const fst = new BuiltInFnExpression((scope, args) => {
+  const forced = getAsArr(scope, args);
+  return forced[0];
+}, false);
+
+export const snd = new BuiltInFnExpression((scope, args) => {
+  const forced = getAsArr(scope, args);
+  return forced[1];
+}, false);
+
 export const take = new BuiltInFnExpression((scope, args) => {
   let [numArg, ll] = getAsArr(scope, args);
   let num = getAsNum(scope, numArg);
@@ -177,6 +228,19 @@ export const take = new BuiltInFnExpression((scope, args) => {
   return new ArrayValue(vals);
 }, false);
 
+export const takeWhile = new BuiltInFnExpression((scope, args) => {
+  let [pred, ll] = unpack<[Callable, Expression]>(scope, args, [getAsFn, getAsIs]);
+  const vals: Expression[] = [];
+  while(true){
+    ll = ll.force(scope);
+    if(!(ll instanceof ArrayValue)) break;
+    if(!pred.execute(scope, ll.getExpressionAt(0)).getValue(scope)) break;
+    vals.push(ll.getExpressionAt(0));
+    ll = ll.getExpressionAt(1);
+  }
+  return new ArrayValue(vals);
+}, false);
+
 export const load = new BuiltInFnExpression((scope, args) => {
   const file = getAsStr(scope, args);
   const prevLocation = scope.fetch('location')?.getValue(scope) || '.';
@@ -184,9 +248,9 @@ export const load = new BuiltInFnExpression((scope, args) => {
   const code = new TextDecoder().decode(Deno.readFileSync(relPath));
   const [ast] = parse(code);
   if(!ast) throw new Error(`Failed to parse ${relPath}`);
-  // console.log(Deno.inspect(ast, { depth: 100, colors: true }));
+  // console.log(Deno.inspect(ast, { depth: 100 }));
   const fileScope = new Scope(scope.root);
-  fileScope.set('location', new ConstantExpression(relPath), 'local');
+  fileScope.set('location', new ConstantExpression(relPath));
   return ast.copyLock(fileScope);
 }, false);
 
@@ -216,6 +280,12 @@ const getAsStr = (scope: Scope, args: Expression): string => {
 const getAsFn = (scope: Scope, args: Expression): Callable => {
   const val = args.getValue(scope);
   if(!(val instanceof Callable)) throw new Error('Invalid argument');
+  return val;
+};
+
+const getAsBool = (scope: Scope, args: Expression): boolean => {
+  const val = args.getValue(scope);
+  if(typeof val !== 'boolean') throw new Error('Invalid argument');
   return val;
 };
 

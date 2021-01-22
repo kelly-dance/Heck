@@ -1,3 +1,6 @@
-filterLinkedList = fn [[head, tail], pred]: if pred head then [head, recurse [tail, pred]] else recurse [tail, pred];
-primes = (fn [head, tail]: [head, recurse filterLinkedList [tail, fn n: n % head != 0]]) (fn n: [n, recurse n + 1]) 2
-print take [1000, primes]
+filterll = fn [[head, tail], pred]:
+  if pred head
+    then [head, recurse [tail, pred]]
+    else recurse [tail, pred];
+primes = (fn [head, tail]: [head, recurse filterll [tail, fn n: n % head != 0]]) (fn n: [n, recurse n + 1]) 2
+return takeWhile [fn n: n < 1000, primes]

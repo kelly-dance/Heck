@@ -70,16 +70,14 @@ export class ReferenceExpression extends Expression {
     return (this.forcedScope || scope).fetch(this.name);
   }
 
-  assign(scope: Scope, value: Expression, local: Local){
-    (this.forcedScope || scope).set(this.name, value.resolve((this.forcedScope || scope)), local);
+  assign(scope: Scope, value: Expression){
+    (this.forcedScope || scope).set(this.name, value.resolve((this.forcedScope || scope)));
   }
 
   copyLock(scope: Scope){
     return new ReferenceExpression(this.name).lock(scope);
   }
 }
-
-export type Local = 'local' | 'any' | 'nonlocal';
 
 export class Scope {
   private values: Map<string, Expression>
@@ -94,22 +92,16 @@ export class Scope {
     return new ConstantExpression(undefined);
   }
 
-  exists(key: string, local: Local): boolean {
-    if(local === 'local') return this.values.has(key);
-    if(local === 'any') return !!(this.values.has(key) || (this.parent && this.parent.exists(key, 'any')));
-    if(local === 'nonlocal') return !!(this.parent && this.parent.exists(key, 'any'));
-    return false; // never
+  exists(key: string): boolean {
+    return !!(this.values.has(key) || (this.parent && this.parent.exists(key)));
   }
 
-  set(key: string, value: Expression, local: Local){
-    if(local === 'local') this.values.set(key, value);
-    else if(local === 'nonlocal') (this.parent || this).set(key, value, 'any');
-    else if(local === 'any'){
-      if(this.exists(key, 'local')) this.values.set(key, value);
-      else if(!this.parent) this.values.set(key, value);
-      else this.parent.set(key, value, 'any');
+  set(key: string, value: Expression){
+    if(this.values.has(key)) {
+      console.log(key, value)
+      throw new Error('Variable cannot be reassigned');
     }
-    // never;
+    this.values.set(key, value);
   }
 
   get root(): Scope {
@@ -138,8 +130,8 @@ export class FunctionValue extends Callable {
   execute(scope: Scope, args: Expression): Expression {
     const go = () => {
       const localScope = new Scope(this.parentScope);
-      localScope.set('recurse', this, 'local');
-      assignToScope(localScope, this.forcedScope || scope, this.argRef, args, 'local');
+      localScope.set('recurse', this);
+      assignToScope(localScope, this.forcedScope || scope, this.argRef, args);
       return this.code.resolve(localScope).resolve(localScope); // resolves twices because expression is wrapped in a ReturnExpression
     }
     if(this.lazy) return new LazyExpression(go);
@@ -283,17 +275,33 @@ export class BinaryMathExpression extends Expression {
 }
 
 export class AssignmentExpression extends Expression {
-  constructor(private location: Expression, private data: Expression, private local: Local){
+  constructor(private location: Expression, private data: Expression){
     super();
   }
 
   resolve(scope: Scope){
-    assignToScope((this.forcedScope || scope), (this.forcedScope || scope), this.location, this.data.copyLock((this.forcedScope || scope)), this.local);
+    assignToScope((this.forcedScope || scope), (this.forcedScope || scope), this.location, this.data.copyLock((this.forcedScope || scope)));
     return this.data;
   }
 
   copyLock(scope: Scope){
-    return new AssignmentExpression(this.location.copyLock(scope), this.data.copyLock(scope), this.local).lock(scope);
+    return new AssignmentExpression(this.location.copyLock(scope), this.data.copyLock(scope)).lock(scope);
+  }
+}
+
+export class ArrayAccessExpression extends Expression {
+  constructor(public array: Expression, public location: Expression){
+    super();
+  }
+
+  resolve(scope: Scope){
+    const resolved = this.array.force((this.forcedScope || scope));
+    if(!(resolved instanceof ArrayValue)) throw new Error('Cannot access a non ArrayValue.');
+    return resolved.getExpressionAt(this.location.getValue((this.forcedScope || scope)));
+  }
+
+  copyLock(scope: Scope){
+    return new ArrayAccessExpression(this.array, this.location).lock(scope);
   }
 }
 
@@ -317,8 +325,8 @@ export class IfElseExpression extends Expression {
   }
 
   resolve(scope: Scope){
-    if(this.condition.getValue((this.forcedScope || scope))) return this.onTrue.resolve(scope);
-    else return this.onFalse?.resolve(scope) || new ConstantExpression(undefined);
+    if(this.condition.getValue((this.forcedScope || scope))) return this.onTrue.resolve((this.forcedScope || scope));
+    else return this.onFalse?.resolve((this.forcedScope || scope)) || new ConstantExpression(undefined);
   }
 
   copyLock(scope: Scope){
@@ -326,15 +334,20 @@ export class IfElseExpression extends Expression {
   }
 }
 
-export const assignToScope = (scope: Scope, oldScope: Scope, location: Expression, data: Expression, local: Local) => {
-  if(location instanceof ReferenceExpression) location.assign(scope, data, local);
+export const assignToScope = (scope: Scope, oldScope: Scope, location: Expression, data: Expression) => {
+  if(location instanceof ReferenceExpression) location.assign(scope, data);
+  else if(location instanceof ArrayAccessExpression) {
+    const arr = location.array.force(scope);
+    if(!(arr instanceof ArrayValue)) throw new Error('Cannot assign a value into a non array value');
+    arr.setExpressionAt(location.location.getValue(scope), data);
+  }
   else {
     location = location.force(scope);
     if(location instanceof ArrayValue){
       data = data.force(oldScope);
       if(data instanceof ArrayValue) {
         for(let i = 0; i < location.length(); i++){
-          assignToScope(scope, oldScope, location.getExpressionAt(i), data.getExpressionAt(i), local);
+          assignToScope(scope, oldScope, location.getExpressionAt(i), data.getExpressionAt(i));
         }
       }
     }

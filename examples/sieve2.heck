@@ -1,0 +1,14 @@
+primesUnder = fn N: {
+  isPrime = map [range [0, N], fn _: true];
+  isPrime @ 0 = false;
+  isPrime @ 1 = false;
+  forLoop [[2, fn p: p < sqrt N, succ], fn p: {
+    if not isPrime @ p then return 0;
+    forLoop [
+      [p * p, fn n: n <= N, fn n: n + p],
+      fn n: isPrime @ n = false
+    ];
+  }];
+  return map [filter [enumerate isPrime, fst], snd];
+};
+return primesUnder 10000;

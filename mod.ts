@@ -6,10 +6,10 @@ const file = Deno.args[0];
 const globalScope = new Scope();
 
 Object.entries(builtins).forEach(([key, fn]) => {
-  if(fn instanceof Expression) globalScope.set(key, fn, 'local');
+  if(fn instanceof Expression) globalScope.set(key, fn);
 });
 
-globalScope.set('location', new ConstantExpression('.'), 'local');
+globalScope.set('location', new ConstantExpression('.'));
 
 // console.log('====EXECUTING====')
 
